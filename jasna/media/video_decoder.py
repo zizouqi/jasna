@@ -2,7 +2,6 @@ import ctypes
 import logging
 import os
 import sys
-from fractions import Fraction
 from typing import Iterator
 
 import av
@@ -364,21 +363,13 @@ class NvidiaVideoReader:
             decoder.height = source_ctx.height
             # PyAV 18 rejects assigning time_base on a decoder ("Cannot access
             # 'time_base' as a decoder"); decoders take timing from packets.
-            # PyAV returns None for unset SAR/framerate rationals (0/0, 0/1),
-            # and its setter then crashes on None.numerator. Assigning None
-            # would crash, so fall back to square pixels (1:1) for streams
-            # without a declared sample aspect ratio.
-            if source_ctx.framerate is not None:
-                decoder.framerate = source_ctx.framerate
-            sar = source_ctx.sample_aspect_ratio
-            decoder.sample_aspect_ratio = (
-                sar if sar is not None else Fraction(1, 1)
-            )
+            decoder.framerate = source_ctx.framerate
+            decoder.sample_aspect_ratio = source_ctx.sample_aspect_ratio
             decoder.open(strict=False)
             self._decoder_ctx = decoder
             self._amd_hardware_decode = True
             log.info("Using AMF hardware decoder %s for %s", decoder_name, self.file)
-        except (ValueError, AttributeError, av.FFmpegError, RuntimeError) as exc:
+        except (ValueError, av.FFmpegError, RuntimeError) as exc:
             source_ctx.thread_type = "AUTO"
             log.warning(
                 "AMF cannot decode %s (codec %s): %s; using FFmpeg software "
