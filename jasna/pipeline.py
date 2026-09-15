@@ -16,7 +16,7 @@ from jasna.frame_queue import FrameQueue
 import psutil
 import torch
 
-from jasna.accelerator import vendor_for_device
+from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.media import UnsupportedColorspaceError, get_video_meta_data
 from jasna.media.video_encoder import NvidiaVideoEncoder
 from jasna.media.frame_rate import resolve_frame_rate_retarget
@@ -615,6 +615,23 @@ class Pipeline:
             if plan.segments != tuple(self.segments or ()):
                 raise ValueError("Precomputed splice plan does not match pipeline segments")
             index = plan.index
+        # AMF's H.264 encoder caps at 3 consecutive B-frames, so it cannot
+        # match sources using more; re-render segments would not stitch
+        # cleanly against the stream-copied ones. Fall back to a full
+        # re-encode instead of failing the job (NVIDIA NVENC has no such cap).
+        if (
+            vendor_for_device(self.device) is AcceleratorVendor.AMD
+            and codec == "h264"
+            and index.max_b_frames > 3
+        ):
+            log.warning(
+                "%s uses %d consecutive B-frames; AMF H.264 smart rendering supports "
+                "at most 3, falling back to a full re-encode",
+                self.input_video,
+                index.max_b_frames,
+            )
+            self._run_full(metadata)
+            return
         smart_encoder_settings = resolve_smart_encoder_settings(
             codec,
             metadata,
